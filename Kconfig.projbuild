@@ -1,0 +1,10 @@
+menu "Component drv_dht Configuration"
+
+    config DRV_DHT_USE
+        bool "Use drv_dht component"
+        default y
+
+    config DRV_DHT_RMT_MODE
+        bool "Use rmt module for sensor interaction"
+        default y
+endmenu
