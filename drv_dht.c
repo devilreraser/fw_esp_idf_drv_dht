@@ -32,11 +32,9 @@
 #if CONFIG_DRV_DHT_RMT_MODE
 #define USE_RMT             1
 #define USE_GPIO            0
-#define USE_GPIO_INTERRUPT  0
 #else
 #define USE_RMT             0
 #define USE_GPIO            1
-#define USE_GPIO_INTERRUPT  0
 #endif
 
 
@@ -46,14 +44,8 @@
 
 
 #if USE_RMT
-#undef USE_GPIO_INTERRUPT
-#define USE_GPIO_INTERRUPT  0
 
 #define USE_RMT_RECONFIGURE_EACH_TRANSMISSION   0
-#endif
-
-
-#if USE_RMT
 
 #if CONFIG_DRV_RMT_USE
 
@@ -78,9 +70,6 @@
 /* *****************************************************************************
  * Constants and Macros Definitions
  **************************************************************************** */
-#if USE_GPIO_INTERRUPT
-#define COUNT_INTERRUPTS_PER_TRANSMISSION_MAX   100
-#endif
 
 /* *****************************************************************************
  * Enumeration Definitions
@@ -98,17 +87,7 @@
  * Variables Definitions
  **************************************************************************** */
 static gpio_num_t dht_gpio;
-static int64_t last_read_time = -2000000;
 static struct drv_dht_reading last_read;
-
-#if USE_GPIO_INTERRUPT
-static bool b_interrupt_registered = false;
-static int interrupts_count = 0;
-static bool b_skip_dht_response_first_bit = false;
-//static uint8_t pin_level[COUNT_INTERRUPTS_PER_TRANSMISSION_MAX] = {0};
-static int delay_edge_change[COUNT_INTERRUPTS_PER_TRANSMISSION_MAX] = {0};
-static int64_t last_interrupt_read_time = 0;
-#endif
 
 /* *****************************************************************************
  * Prototype of functions definitions
@@ -118,15 +97,8 @@ static int64_t last_interrupt_read_time = 0;
  * Functions
  **************************************************************************** */
 
-// static int _waitOrTimeout(uint16_t microSeconds, int level) {
-//     int micros_ticks = 0;
-//     while(gpio_get_level(dht_gpio) == level) { 
-//         if(micros_ticks++ > microSeconds) 
-//             return DRV_DHT_TIMEOUT_ERROR;
-//         ets_delay_us(1);
-//     }
-//     return micros_ticks;
-// }
+#if USE_GPIO
+#else
 
 static int _checkCRC(uint8_t data[]) {
     if(data[4] == (uint8_t)(data[0] + data[1] + data[2] + data[3]))
@@ -135,43 +107,8 @@ static int _checkCRC(uint8_t data[]) {
         return DRV_DHT_CRC_ERROR;
 }
 
-#if USE_GPIO_INTERRUPT
-static void IRAM_ATTR dht11_gpio_isr_handler(void* arg) 
-{
-    int64_t curr_interrupt_read_time = esp_timer_get_time();
-    // Handle interrupt here
-    //ESP_LOGI(TAG, "%d", gpio_get_level(dht_gpio));
-    //pin_level[interrupts_count] = gpio_get_level(dht_gpio);
-
-    if (b_skip_dht_response_first_bit)
-    {
-        b_skip_dht_response_first_bit = false;
-    }
-    else
-    {
-        delay_edge_change[interrupts_count] = curr_interrupt_read_time - last_interrupt_read_time;
-        interrupts_count++;
-    }
-
-    last_interrupt_read_time = curr_interrupt_read_time;
-}
-#endif
-
-
-
 static void _sendStartSignal() {
     gpio_set_direction(dht_gpio, GPIO_MODE_INPUT_OUTPUT_OD);
-
-    #if USE_GPIO_INTERRUPT
-    if (b_interrupt_registered == false)
-    {
-        gpio_install_isr_service(ESP_INTR_FLAG_SHARED); // Choose an appropriate interrupt flag
-        gpio_set_intr_type(dht_gpio, GPIO_INTR_NEGEDGE);
-        gpio_isr_handler_add(dht_gpio, dht11_gpio_isr_handler, (void*) dht_gpio);
-        b_interrupt_registered = true;
-    }
-    #endif
-
 
     #if USE_RMT
     #if CONFIG_DRV_RMT_USE
@@ -186,20 +123,10 @@ static void _sendStartSignal() {
     #endif
     #endif
 
-
     gpio_set_level(dht_gpio, 0);
 
     //vTaskDelay(pdMS_TO_TICKS(20));
     ets_delay_us(20 * 1000);
-
-    #if USE_GPIO_INTERRUPT
-    last_interrupt_read_time = esp_timer_get_time();
-
-    interrupts_count = 0;
-    b_skip_dht_response_first_bit = true;
-    gpio_intr_enable(dht_gpio);
-    #endif
-
 
     #if USE_RMT
     #if CONFIG_DRV_RMT_USE
@@ -219,47 +146,13 @@ static void _sendStartSignal() {
     //ets_delay_us(40);
 }
 
-#if USE_RMT == 0
-static void _completed_transmission()
-{
-    #if USE_GPIO_INTERRUPT
-    gpio_intr_disable(dht_gpio);
-    //gpio_set_direction(dht_gpio, GPIO_MODE_INPUT);
-    ESP_LOGD(TAG, "Count Interrupts %d", interrupts_count);
-    //ESP_LOG_BUFFER_HEX(TAG, pin_level, interrupts_count);
-
-    for (int index = 0; index < interrupts_count; index++)
-    {
-        ESP_LOGD(TAG, "[%2d]=%6d", index, delay_edge_change[index]);
-    }
-    #endif
-}
 #endif
-
-// static int _checkResponse() {
-//     /* Wait for next step ~80us*/
-//     if(_waitOrTimeout(80, 0) == DRV_DHT_TIMEOUT_ERROR)
-//         return DRV_DHT_TIMEOUT_ERROR;
-
-//     /* Wait for next step ~80us*/
-//     if(_waitOrTimeout(80, 1) == DRV_DHT_TIMEOUT_ERROR) 
-//         return DRV_DHT_TIMEOUT_ERROR;
-
-//     return DRV_DHT_OK;
-// }
-
-// static struct drv_dht_reading _timeoutError() {
-//     struct drv_dht_reading timeoutError = {DRV_DHT_TIMEOUT_ERROR, -1, -1};
-//     return timeoutError;
-// }
-
-// static struct drv_dht_reading _crcError() {
-//     struct drv_dht_reading crcError = {DRV_DHT_CRC_ERROR, -1, -1};
-//     return crcError;
-// }
 
 void drv_dht_init(gpio_num_t gpio_num) 
 {
+    #if USE_GPIO
+    esp_log_level_set("dht", ESP_LOG_INFO);
+    #endif
     esp_log_level_set(TAG, ESP_LOG_INFO);
     /* Wait 1 seconds to make the device pass its initial unstable status */
     vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -286,7 +179,7 @@ struct drv_dht_reading drv_dht_read()
 {
     int16_t humidity;
     int16_t temperature;
-    esp_err_t err_read = dht_read_data(dht_sensor_type_t sensor_type, dht_gpio, &humidity, &temperature);
+    esp_err_t err_read = dht_read_data(DHT_TYPE_DHT11, dht_gpio, &humidity, &temperature);
     last_read.temperature = temperature / 10;
     last_read.humidity = humidity / 10;
     last_read.status = (err_read == ESP_OK) ? DRV_DHT_OK : DRV_DHT_TIMEOUT_ERROR;
@@ -307,23 +200,6 @@ struct drv_dht_reading drv_dht_read()
     uint8_t data[5] = {0,0,0,0,0};
 
     _sendStartSignal();
-
-    // if(_checkResponse() == DRV_DHT_TIMEOUT_ERROR)
-    //     return last_read = _timeoutError();
-    
-    // /* Read response */
-    // for(int i = 0; i < 40; i++) {
-    //     /* Initial data */
-    //     if(_waitOrTimeout(50, 0) == DRV_DHT_TIMEOUT_ERROR)
-    //         return last_read = _timeoutError();
-                
-    //     if(_waitOrTimeout(70, 1) > 28) {
-    //         /* Bit received was a 1 */
-    //         data[i/8] |= (1 << (7-(i%8)));
-    //     }
-    // }
-
-
 
 
     #if USE_RMT == 0
@@ -377,22 +253,6 @@ struct drv_dht_reading drv_dht_read()
     
     #endif
 
-
-#if USE_GPIO_INTERRUPT
-    if (interrupts_count == 40)
-    {
-        for (int index = 0; index < interrupts_count; index++)
-        {
-            if(delay_edge_change[index] >= 120)   //50+28 for 0 | 50+70 for 1
-            {
-                /* Bit received was a 1 */
-                data[index/8] |= (1 << (7-(index%8)));
-            }
-        }
-        ESP_LOG_BUFFER_HEX(TAG, data, 5);
-    }
-    else
-#endif
 #if USE_RMT
     if (len == 5)
     {
