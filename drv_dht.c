@@ -88,6 +88,7 @@
  **************************************************************************** */
 static gpio_num_t dht_gpio;
 static struct drv_dht_reading last_read;
+static int64_t last_read_time = -2000000;
 
 /* *****************************************************************************
  * Prototype of functions definitions
@@ -97,8 +98,7 @@ static struct drv_dht_reading last_read;
  * Functions
  **************************************************************************** */
 
-#if USE_GPIO
-#else
+#if USE_RMT
 
 static int _checkCRC(uint8_t data[]) {
     if(data[4] == (uint8_t)(data[0] + data[1] + data[2] + data[3]))
@@ -108,42 +108,29 @@ static int _checkCRC(uint8_t data[]) {
 }
 
 static void _sendStartSignal() {
+    gpio_set_level(dht_gpio, 1);
     gpio_set_direction(dht_gpio, GPIO_MODE_INPUT_OUTPUT_OD);
 
-    #if USE_RMT
     #if CONFIG_DRV_RMT_USE
     #if USE_RMT_RECONFIGURE_EACH_TRANSMISSION
-    drv_rmt_test_init_rx(); //test rmt pin and dht_gpio must match
+    drv_rmt_init_rx(); //test rmt pin and dht_gpio must match
     #else
-    size_t len = drv_rmt_test_read_rx(NULL, 0, 0); 
-    ESP_LOGD(TAG, "Read Buffer Before Transmission : %d ", len);
-    #endif
-    #else
-    //to do local imlementation of rmt driver
+    ESP_LOGD(TAG, "Read Buffer Before Transmission Start");
+    size_t len = drv_rmt_read_rx(NULL, 0, 0); 
+    ESP_LOGD(TAG, "Read Buffer Before Transmission %d bytes", len);
     #endif
     #endif
 
     gpio_set_level(dht_gpio, 0);
-
-    //vTaskDelay(pdMS_TO_TICKS(20));
-    ets_delay_us(20 * 1000);
-
-    #if USE_RMT
+    
     #if CONFIG_DRV_RMT_USE
-    #if USE_RMT_RECONFIGURE_EACH_TRANSMISSION
-    drv_rmt_test_start_rx();
-    #else
-    drv_rmt_test_start_rx();
-    //drv_rmt_test_reset_rx();
+    drv_rmt_start_rx();
     #endif
-    #else
-    //to do local imlementation of rmt driver
-    #endif
-    #endif
+
+    ets_delay_us(20 * 1000);
 
     gpio_set_level(dht_gpio, 1);
 
-    //ets_delay_us(40);
 }
 
 #endif
@@ -163,11 +150,8 @@ void drv_dht_init(gpio_num_t gpio_num)
     #if CONFIG_DRV_RMT_USE
     #if USE_RMT_RECONFIGURE_EACH_TRANSMISSION
     #else
-    drv_rmt_test_init_rx(); //test rmt pin and dht_gpio must match
-    drv_rmt_test_start_rx();
+    drv_rmt_init_rx();
     #endif
-    #else
-    //to do local imlementation of rmt driver
     #endif
     #endif
 
@@ -214,15 +198,13 @@ struct drv_dht_reading drv_dht_read()
     size_t len = 0;
     #define pdMS_TO_TICKS_FIX(x) (pdMS_TO_TICKS(x) > 0) ? pdMS_TO_TICKS(x) : 1  //at least one rtos tick
     TickType_t delay = pdMS_TO_TICKS_FIX(80);  //at least one rtos tick
-    len = drv_rmt_test_read_rx(data, sizeof(data), delay); 
-    //len = drv_rmt_test_read_rx(data, sizeof(data), portMAX_DELAY); //at least one rtos tick
-
+    ESP_LOGD(TAG, "Read Buffer After Transmission Start");
+    len = drv_rmt_read_rx(data, sizeof(data), delay); 
+    ESP_LOGD(TAG, "Read Buffer After Transmission %d bytes", len);
+    drv_rmt_stop_rx();
 
     #if USE_RMT_RECONFIGURE_EACH_TRANSMISSION
-    drv_rmt_test_stop_rx();
-    drv_rmt_test_deinit_rx();
-    #else
-    drv_rmt_test_stop_rx();
+    drv_rmt_deinit_rx();
     #endif
 
     if (len)
@@ -235,18 +217,6 @@ struct drv_dht_reading drv_dht_read()
     }
 
 
-
-
-
-    // ets_delay_us(10000);
-    // gpio_set_level(dht_gpio, 0);
-    // ets_delay_us(1000);
-    // gpio_set_level(dht_gpio, 1);
-
-    
-
-    #else
-    //to do local imlementation of rmt driver
     #endif
 
     gpio_set_direction(dht_gpio, GPIO_MODE_INPUT);
